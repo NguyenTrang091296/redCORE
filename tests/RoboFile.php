@@ -23,7 +23,10 @@ class RoboFile extends \Robo\Tasks
 	const OS_WIN = 2;
 	const OS_LINUX = 3;
 	const OS_OSX = 4;
-
+    private $defaultArgs = [
+        '--tap',
+        '--fail-fast'
+    ];
 	/**
 	 * Identify the OS
 	 *
@@ -306,6 +309,42 @@ class RoboFile extends \Robo\Tasks
 			->run()
 			->stopOnFail();
 	}
+
+    public function testsSitePreparation($use_htaccess = 1, $cleanUp = 1)
+    {
+        $skipCleanup = false;
+        // Get Joomla Clean Testing sites
+        if (is_dir('/joomla-cms'))
+        {
+            if (!$cleanUp)
+            {
+                $skipCleanup = true;
+                $this->say('Using cached version of Joomla CMS and skipping clone process');
+            }
+            else
+            {
+                $this->taskDeleteDir('/joomla-cms')->run();
+            }
+        }
+        if (!$skipCleanup)
+        {
+            $version = 'staging';
+            /*
+            * When joomla Staging branch has a bug you can uncomment the following line as a tmp fix for the tests layer.
+            * Use as $version value the latest tagged stable version at: https://github.com/joomla/joomla-cms/releases
+            */
+            $version = '3.9.0';
+            $this->_exec("git clone -b $version --single-branch --depth 1 https://github.com/joomla/joomla-cms.git joomla-cms");
+            $this->say("Joomla CMS ($version) site created at joomla-cms");
+        }
+        // Optionally uses Joomla default htaccess file
+        if ($use_htaccess == 1)
+        {
+            $this->_copy('joomla-cms/htaccess.txt', 'joomla-cms/.htaccess');
+            $this->_exec('sed -e "s,# RewriteBase /,RewriteBase /joomla-cms/,g" --in-place joomla-cms/.htaccess');
+        }
+    }
+
 
 	/**
 	 * Function to Run tests in a Group
@@ -672,4 +711,94 @@ class RoboFile extends \Robo\Tasks
 			}
 		}
 	}
+
+    /**
+     * Tests setup
+     *
+     * @param   boolean  $debug   Add debug to the parameters
+     * @param   boolean  $steps   Add steps to the parameters
+     *
+     * @return  void
+     * @since   5.6.0
+     */
+    public function testsSetup($debug = true, $steps = true)
+    {
+        $args = [];
+
+        if ($debug)
+        {
+            $args[] = '--debug';
+        }
+
+        if ($steps)
+        {
+            $args[] = '--steps';
+        }
+
+        $args = array_merge(
+            $args,
+            $this->defaultArgs
+        );
+
+        // Sets the output_append variable in case it's not yet
+        if (getenv('output_append') === false)
+        {
+            $this->say('Setting output_append');
+            putenv('output_append=');
+        }
+
+        // Builds codeception
+        $this->_exec("vendor/bin/codecept build");
+
+        // Executes the initial set up
+        $this->taskCodecept()
+            ->args($args)
+            ->arg('acceptance/install/')
+            ->run()
+            ->stopOnFail();
+    }
+    /**
+     * Individual test folder execution
+     *
+     * @param   string   $folder  Folder to execute codecept run to
+     * @param   boolean  $debug   Add debug to the parameters
+     * @param   boolean  $steps   Add steps to the parameters
+     *
+     * @return  void
+     * @since   5.6.0
+     */
+    public function testsRun($folder, $debug = true, $steps = true)
+    {
+        $args = [];
+
+        if ($debug)
+        {
+            $args[] = '--debug';
+        }
+
+        if ($steps)
+        {
+            $args[] = '--steps';
+        }
+
+        $args = array_merge(
+            $args,
+            $this->defaultArgs
+        );
+        // Sets the output_append variable in case it's not yet
+        if (getenv('output_append') === false)
+        {
+            putenv('output_append=');
+        }
+
+        // Codeception build
+        $this->_exec("vendor/bin/codecept build");
+
+        // Actual execution of Codeception test
+        $this->taskCodecept()
+            ->args($args)
+            ->arg( $folder . '/')
+            ->run()
+            ->stopOnFail();
+    }
 }
